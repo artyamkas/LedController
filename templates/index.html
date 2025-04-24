@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>LED Control Panel</title>
+  <meta name="current-ip" content="{{ current_ip }}">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <!-- Подключаем библиотеку Pickr -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@simonwep/pickr/dist/themes/classic.min.css">
+</head>
+<body>
+  <header class="header">
+    <h1 class="title">Управление LED-лентой</h1>
+    <div class="status" id="status">Подключение...</div>
+  </header>
+<div class="control-grid">
+  <div class="power-control">
+    <div class="power-status">
+      <span>Состояние: </span>
+      <span id="powerStateText">Выключен</span>
+      <span id="powerIndicator" class="indicator off"></span>
+    </div>
+
+    <div class="power-buttons">
+      <a id="powerOnLink"><button id="powerOnBtn" class="power-btn">Включить</button></a>
+      <a id="powerOffLink"><button id="powerOffBtn" class="power-btn" disabled>Выключить</button></a>
+    </div>
+  </div>
+  <div class="color-control">
+    <h3>Выбор цвета</h3>
+    <div class="current-color-section">
+      <div class="color-label">Текущий цвет:</div>
+      <div id="colorPreview" class="color-preview"></div>
+    </div>
+    <div id="colorPicker" class="pickr"></div>
+    <button id="applyColorBtn" class="color-btn">Применить цвет</button>
+  </div>
+  <div class="mode-control">
+    <h3>Выбор режима</h3>
+    <div class="current-mode">
+      <span>Текущий режим: </span>
+      <span id="currentModeText">Статичный</span>
+    </div>
+    <div class="mode-buttons">
+      <button data-mode="0" class="mode-btn active">Статичный</button>
+      <button data-mode="1" class="mode-btn">Дыхание</button>
+      <button data-mode="2" class="mode-btn">Радуга</button>
+      <button data-mode="3" class="mode-btn">Музыка</button>
+    </div>
+  </div>
+</div>
+  <div id="ipModal" class="modal">
+    <div class="modal-content">
+      <span class="close">&times;</span>
+      <h2>Настройки подключения</h2>
+      <label for="ipInput">IP-адрес контроллера:</label>
+      <div class="ip-input-container">
+        <input type="text" id="ipInput" value="http://192.168.1.100">
+      </div>
+      <button id="saveIpBtn" class="save-btn">Сохранить</button>
+    </div>
+  </div>
+  <div id="connectionAlert" class="connection-alert">
+    <div class="alert-content">
+      <p>Не удалось подключиться к устройству</p>
+      <p class="alert-hint">Нажмите на статус для настройки подключения</p>
+    </div>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/@simonwep/pickr/dist/pickr.min.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const statusEl = document.getElementById('status');
+        const ipModal = document.getElementById('ipModal');
+        const ipInput = document.getElementById('ipInput');
+        const saveIpBtn = document.getElementById('saveIpBtn');
+        const closeModal = document.querySelector('.close');
+        const powerOnBtn = document.getElementById('powerOnBtn');
+        const powerOffBtn = document.getElementById('powerOffBtn');
+        const powerIndicator = document.getElementById('powerIndicator');
+        const powerStateText = document.getElementById('powerStateText');
+        const alertBox = document.getElementById('connectionAlert');
+
+        // Загружаем состояние из localStorage (по умолчанию false - выключено)
+        let isDeviceOn = localStorage.getItem('deviceState') === 'true';
+
+        // Функция обновления состояния
+        function updatePowerState() {
+          if (isDeviceOn) {
+            powerIndicator.className = 'indicator on';
+            powerStateText.textContent = 'Включен';
+            powerOnBtn.disabled = true;
+            powerOffBtn.disabled = false;
+          } else {
+            powerIndicator.className = 'indicator off';
+            powerStateText.textContent = 'Выключен';
+            powerOnBtn.disabled = false;
+            powerOffBtn.disabled = true;
+          }
+        }
+        // Обработчики кнопок
+        powerOnBtn.addEventListener('click', async () => {
+          const response = await fetch(`/power/on`);
+          if (response.ok) {
+            isDeviceOn = true;
+            localStorage.setItem('deviceState', 'true');
+            updatePowerState();}
+        });
+
+        powerOffBtn.addEventListener('click', async () => {
+          const response = await fetch(`/power/off`);
+          if (response.ok) {
+            isDeviceOn = false;
+            localStorage.setItem('deviceState', 'false');
+            updatePowerState();}
+        });
+
+        updatePowerState();
+
+        // Загружаем IP из сервера при загрузке
+        let controllerURL = 'http://192.168.1.100'; // дефолтное значение
+
+        // Функция загрузки текущего IP с сервера
+        async function loadCurrentIP() {
+            try {
+                const response = await fetch('/');
+                const text = await response.text();
+                const parser = new DOMParser();
+                const doc = parser.parseFromString(text, 'text/html');
+                const ipMeta = doc.querySelector('meta[name="current-ip"]');
+                if (ipMeta) {
+                    controllerURL = ipMeta.content;
+                    ipInput.value = controllerURL;
+                }
+            } catch (e) {
+                console.error('Error loading current IP:', e);
+            }
+        }
+
+        // Проверка подключения
+        async function checkConnection() {
+            statusEl.textContent = "Проверка подключения...";
+            statusEl.style.color = "#666";
+
+            try {
+                await new Promise(resolve => setTimeout(resolve, 500));
+                const res = await fetch(`${controllerURL}/`, {
+                    method: "GET",
+                    mode: "no-cors",
+                    cache: "no-store"
+                });
+                statusEl.textContent = "Подключено";
+                statusEl.style.color = "#006400";
+                alertBox.style.display = 'none'; // Скрываем алерт при успехе
+            } catch (e) {
+                statusEl.textContent = "Нет подключения";
+                statusEl.style.color = "#800000";
+                alertBox.style.display = 'block'; // Показываем алерт при ошибке
+
+            }
+        }
+        document.getElementById('connectionAlert').addEventListener('click', function() {
+          this.style.display = 'none';
+        });
+
+        // Обработчики событий
+        statusEl.addEventListener('click', () => {
+            ipInput.value = controllerURL;
+            ipModal.style.display = 'block';
+        });
+
+        closeModal.addEventListener('click', () => {
+            ipModal.style.display = 'none';
+        });
+
+        saveIpBtn.addEventListener('click', async () => {
+            const newIP = ipInput.value.trim();
+            if (newIP) {
+                try {
+                    const response = await fetch('/update_ip', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/x-www-form-urlencoded',
+                        },
+                        body: `ip=${encodeURIComponent(newIP)}`
+                    });
+
+                    if (response.ok) {
+                        controllerURL = newIP;
+                        localStorage.setItem('controllerURL', newIP);
+                        ipModal.style.display = 'none';
+                        await checkConnection();
+                    }
+                } catch (e) {
+                    console.error('Error updating IP:', e);
+                }
+            }
+        });
+
+        window.addEventListener('click', (event) => {
+            if (event.target == ipModal) {
+                ipModal.style.display = 'none';
+            }
+        });
+
+        // Инициализация
+        loadCurrentIP().then(() => {
+            checkConnection();
+            setInterval(checkConnection, 30000);
+        });
+        // Инициализация цветового круга
+        const pickr = Pickr.create({
+          el: '#colorPicker',
+          theme: 'classic',
+          default: localStorage.getItem('ledColor') || '#FFFFFF',
+          components: {
+            preview: true,
+            opacity: false,
+            hue: true,
+            interaction: {
+              hex: true,
+              input: true,
+            }
+          }
+        });
+
+        const colorPreview = document.getElementById('colorPreview');
+        const applyColorBtn = document.getElementById('applyColorBtn');
+
+        // Установка начального цвета
+        const initialColor = localStorage.getItem('ledColor') || '#FFFFFF';
+        colorPreview.style.backgroundColor = initialColor;
+
+        // При изменении цвета
+        pickr.on('change', (color) => {
+          const hexColor = color.toHEXA().toString();
+          pickr.setColor(hexColor);
+        });
+
+        // Применение цвета
+        applyColorBtn.addEventListener('click', async () => {
+          const hexColor = pickr.getColor().toHEXA().toString();
+
+          const rgb = hexToRgb(hexColor);
+          if (rgb) {
+            const response = await fetch(`/color?r=${rgb.r}&g=${rgb.g}&b=${rgb.b}`);
+            if (response.ok) {
+              showSuccessMessage('Цвет применен!')
+              colorPreview.style.backgroundColor = hexColor;
+              localStorage.setItem('ledColor', hexColor);
+          };
+          }
+        });
+
+        // Функция конвертации HEX в RGB
+        function hexToRgb(hex) {
+          const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+          return result ? {
+            r: parseInt(result[1], 16),
+            g: parseInt(result[2], 16),
+            b: parseInt(result[3], 16)
+          } : null;
+        }
+
+        // Функция показа уведомления
+        function showSuccessMessage(text) {
+          const msg = document.createElement('div');
+          msg.className = 'success-message';
+          msg.textContent = text;
+          document.body.appendChild(msg);
+
+          setTimeout(() => {
+            msg.classList.add('fade-out');
+            setTimeout(() => msg.remove(), 500);
+          }, 2000);
+        }
+
+        const modeButtons = document.querySelectorAll('.mode-btn');
+        const currentModeText = document.getElementById('currentModeText');
+
+        // Загружаем сохраненный режим (по умолчанию 0 - Статичный)
+        let currentMode = localStorage.getItem('ledMode') || '0';
+
+        // Обновляем интерфейс
+        function updateModeUI() {
+          modeButtons.forEach(btn => {
+            const mode = btn.dataset.mode;
+            btn.classList.toggle('active', mode === currentMode);
+            btn.disabled = mode === currentMode;
+          });
+
+          // Обновляем текст текущего режима
+          const modeNames = {
+            '0': 'Статичный',
+            '1': 'Дыхание',
+            '2': 'Радуга',
+            '3': 'Музыка'
+          };
+          currentModeText.textContent = modeNames[currentMode];
+        }
+
+        // Обработчики кликов
+        modeButtons.forEach(btn => {
+          btn.addEventListener('click', async function() {
+            const selectedMode = this.dataset.mode;
+
+            // Отправляем на сервер
+            const formData = new FormData();
+            formData.append('mode', selectedMode);
+
+            const response = await fetch('/mode', {
+              method: 'POST',
+              body: formData
+            });
+            if (response.ok) {
+              currentMode = selectedMode;
+              localStorage.setItem('ledMode', currentMode);
+              updateModeUI();
+              showSuccessMessage('Режим изменен!');}
+            });
+          });
+
+        // Инициализация
+        updateModeUI();
+
+    });
+  </script>
+</body>
+</html>
